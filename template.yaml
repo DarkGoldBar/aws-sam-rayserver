@@ -1,0 +1,123 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  AWS SAM 模板 – 代理服务器云服务示例包含两个 Lambda 函数：
+  ① 客户端 GET 请求处理（验证 uuid、返回 vmess 地址、启动新实例）
+  ② 每小时检查空闲 EC2 实例
+
+Parameters:
+  InstanceTag:
+    Type: String
+    Default: "MyProxyTag"
+    Description: "启动的 EC2 实例所带的固定 TAG 值"
+  AmiId:
+    Type: String
+    Default: "ami-05206bf8aecfc7ae6"
+    Description: "启动新 EC2 实例使用的 AMI ID; https://ap-northeast-1.console.aws.amazon.com/ec2/home?region=ap-northeast-1#AMICatalog:"
+  InstanceType:
+    Type: String
+    Default: "t3.nano"
+    Description: "EC2 实例类型"
+  Port:
+    Type: Number
+    Default: 8080
+    Description: "代理服务端口"
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Architectures:
+      - arm64
+    Timeout: 30  # 默认超时时间，秒
+    MemorySize: 256  # 默认内存大小，MB
+
+  Api:
+    EndpointConfiguration: REGIONAL  # 使用区域性 API Gateway 以避免边缘优化
+
+
+Resources:
+  MySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow SSH and HTTP access
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: !Ref Port
+          ToPort: !Ref Port
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: MySecurityGroup
+
+  MyApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+
+  ProxyRequestHandler:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: get_handler.lambda_handler
+      CodeUri: app/
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref MyApi
+            Path: /proxy
+            Method: post
+      Environment:
+        Variables:
+          INSTANCE_TAG: !Ref InstanceTag
+          AMI_ID: !Ref AmiId
+          INSTANCE_TYPE: !Ref InstanceType
+          SECURITY_GROUP_ID: !Ref MySecurityGroup
+          PROXY_PORT: !Ref Port
+      Policies:
+        - PolicyName: ProxyEC2Policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:RunInstances
+                  - ec2:CreateTags
+                  - ec2:TerminateInstances
+                Resource: "*"
+
+  IdleCheckHandler:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: check_handler.lambda_handler
+      CodeUri: app/
+      Environment:
+        Variables:
+          INSTANCE_TAG: !Ref InstanceTag
+      Policies:
+        - PolicyName: IdleEC2Policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:TerminateInstances
+                  - cloudwatch:GetMetricStatistics
+                  - cloudwatch:ListMetrics
+                Resource: "*"
+      Events:
+        IdleCheckSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 hour)
+            Name: IdleCheckSchedule
+
+Outputs:
+  ProxyApiUrl:
+    Description: "API Gateway endpoint URL for proxy GET request"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/proxy?uuid=de40bdf4-2861-45fd-bf9e-a073635cbcc2"

@@ -102,7 +102,7 @@ def lambda_handler(event, context):
     
     # 检查运行中的服务
     ec2 = boto3.resource('ec2')
-    instances = ec2.instances.filter(Filters=[{'Name': 'tag:Name', 'Values': [TAGNAME]}])
+    instances = ec2.instances.filter(Filters=[{'Name': 'tag:ProxyService', 'Values': [TAGNAME]}])
 
     # 无可用服务时开启新服务
     if not [i for i in instances if i.state['Name'] != 'terminated']:

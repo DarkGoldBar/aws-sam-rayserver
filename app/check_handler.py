@@ -10,11 +10,11 @@ def lambda_handler(event, context):
     ec2 = boto3.resource('ec2')
     cloudwatch = boto3.client('cloudwatch')
 
-    # 查询状态为running的ec2实例，过滤出tag:ProxyService=TAGNAME的实例，将他们的instanceID保存到列表。
+    # 查询状态为running的ec2实例，过滤出tag:ProxyService=INSTANCE_TAG 的实例，将他们的instanceID保存到列表。
     instances = ec2.instances.filter(
         Filters=[
             {'Name': 'instance-state-name', 'Values': ['running']},
-            {'Name': 'tag:ProxyService', 'Values': [TAGNAME]}
+            {'Name': 'tag:ProxyService', 'Values': [INSTANCE_TAG]}
         ]
     )
     instance_ids = [instance.id for instance in instances]

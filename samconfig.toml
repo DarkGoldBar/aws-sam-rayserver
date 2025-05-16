@@ -16,6 +16,10 @@ lint = true
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = true
 resolve_s3 = true
+s3_prefix = "aws-sam-rayserver"
+region = "ap-northeast-1"
+parameter_overrides = "InstanceTag=\"MyProxyTag\" AmiId=\"ami-0c1638aa346a43fe8\" InstanceType=\"t3.nano\" Port=\"8080\""
+image_repositories = []
 
 [default.package.parameters]
 resolve_s3 = true

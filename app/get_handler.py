@@ -1,6 +1,7 @@
 import os
 import json
 import boto3
+import time
 import base64
 from datetime import datetime, timezone
 
@@ -46,7 +47,7 @@ VMESSDATA = {
 def base64_encode(string:str):
     return base64.b64encode(string.encode()).decode()
 
-def create_server(ec2_client):
+def create_server(ec2):
     """
     启动新的 EC2 实例，并在用户数据中加入获取实例信息的命令。
     """
@@ -55,37 +56,21 @@ def create_server(ec2_client):
     with open("./config.json") as f:
         config = json.load(f)
     config["inbounds"][0]["port"] = int(PROXY_PORT)
-    config["inbounds"][0]["settings"] = [{'clients': [{'id': uuid}]} for uuid in ALLOWED_UUIDS]
-    user_data = base64.b64encode(user_data_template.format(json.dumps(config)))
+    config["inbounds"][0]["settings"] = {'clients': [{'id': uuid} for uuid in ALLOWED_UUIDS]}
+    user_data = user_data_template.format(json.dumps(config))
 
     try:
-        response = ec2_client.run_instances(
+        instances = ec2.create_instances(
             ImageId=AMI_ID,
             InstanceType=INSTANCE_TYPE,
             MinCount=1,
             MaxCount=1,
-            UserData=user_data,
-            TagSpecifications=[
-                {
-                    'ResourceType': 'instance',
-                    'Tags': [
-                        {
-                            'Key': 'ProxyService',
-                            'Value': INSTANCE_TAG
-                        },
-                    ]
-                },
-            ],
-            NetworkInterfaces=[
-                {
-                    "DeviceIndex": 0,
-                    "AssociatePublicIpAddress": True,
-                    "Groups": [SECURITY_GROUP_ID]
-                }
-            ]
+            SecurityGroupIds=[SECURITY_GROUP_ID],
+            UserData=user_data
         )
-        instance_id = response['Instances'][0]['InstanceId']
-        print(f"Launched new instance: {instance_id}")
+        for instance in instances:
+            instance.create_tags(Tags=[{'Key': 'ProxyService', 'Value': INSTANCE_TAG}])
+            print(f"Launched new instance: {instance.id}")
     except Exception as e:
         print(f"Error launching instance: {str(e)}")
 
@@ -102,11 +87,15 @@ def lambda_handler(event, context):
     
     # 检查运行中的服务
     ec2 = boto3.resource('ec2')
-    instances = ec2.instances.filter(Filters=[{'Name': 'tag:ProxyService', 'Values': [TAGNAME]}])
+    instances = ec2.instances.filter(Filters=[{'Name': 'tag:ProxyService', 'Values': [INSTANCE_TAG]}])
 
     # 无可用服务时开启新服务
-    if not [i for i in instances if i.state['Name'] != 'terminated']:
-        create_server()
+    running = [i for i in instances if i.state['Name'] != 'terminated']
+    print(running)
+    if not running:
+        create_server(ec2)
+        time.sleep(1)
+        instances = ec2.instances.filter(Filters=[{'Name': 'tag:ProxyService', 'Values': [INSTANCE_TAG]}])
 
     # 生成地址
     vmess_list = []
